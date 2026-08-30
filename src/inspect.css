@@ -1,0 +1,289 @@
+/* ── HUD 档:左下角耍刀 ────────────────────────────────────────────────────────
+   CS 的检视是**在对战中**发生的 —— 你还看着战场,只是手上那把刀被举起来耍两下。
+   对应到 Forsion:「战场」就是当前 Space 页面本身。位置贴**右下角**(CS 的持刀手就在右边)。
+   这一层必须
+   ① 背景全透明(看得见底下的界面)
+   ② `pointer-events: none`(照常打字/点按钮 —— 这才叫「游戏还在进行」)
+
+   ⚠️**这一层绝不能写 `-webkit-app-region: no-drag`**(与下面的全屏面板正好相反)。
+   拖窗区是 drag 并集减 no-drag 并集,与 pointer-events 无关:这一层落在 Shell 的拖窗区上,
+   写了 no-drag 等于**把那块从拖窗区抠掉**,用户从此拖不动窗口。
+   默认值 `none` 既不加也不减,正是要的。 */
+.fi-hud {
+  /* 铺满整个视口 —— **不是**只占右下一块。CS 的构图是「右手持刀在右下、左手在左下」,
+     画布只给右下角的话左手会落在屏幕正中央,凭空一只手。反正整层透明且穿透,不占地方。 */
+  position: fixed;
+  inset: 0;
+  z-index: 2147482000; /* 低于全屏面板,高于应用内容 */
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.fi-hud.is-in { opacity: 1; }
+.fi-hud canvas { display: block; width: 100%; height: 100%; }
+
+/* 检视台浮层。刻意自成一套暗色 —— 它是个全屏「看东西」的场景,不是应用界面,
+   不跟随 data-theme/data-skin(跟了反而在浅色皮肤下白花花一片,看不见金属高光)。
+   唯一从宿主借的是品质色,由 JS 写进 --fi-tier。 */
+
+.fi-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000; /* 靠 DOM 后置取胜(body 末尾),这个数只是保险 */
+  display: grid;
+  grid-template-rows: 1fr auto;
+  background: radial-gradient(120% 90% at 50% 42%, #1b2026 0%, #0b0d10 62%, #060709 100%);
+  color: #e8edf4;
+  font: 14px/1.5 ui-sans-serif, system-ui, 'Noto Sans SC', sans-serif;
+  opacity: 0;
+  transition: opacity 180ms ease;
+  /* ⚠️ Electron 拖窗区按 DOM 顺序几何合成、与 z-index 无关:不写这行,浮层与 ribbon /
+     左侧栏重叠的矩形内点击、hover、滚轮全被窗口标题栏吞掉(仅 mac,浏览器里复现不了)。 */
+  -webkit-app-region: no-drag;
+}
+.fi-root.is-in { opacity: 1; }
+
+.fi-stage { position: relative; min-height: 0; }
+.fi-stage canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.fi-stage canvas:active { cursor: grabbing; }
+
+/* 顶部:名字条 + 品质色竖杠(CS 检视界面的招牌构图) */
+.fi-head {
+  position: absolute;
+  top: 6vh;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+}
+.fi-name {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-shadow: 0 2px 18px #000a;
+}
+.fi-tierbar {
+  width: 168px;
+  height: 3px;
+  margin: 10px auto 0;
+  border-radius: 2px;
+  background: var(--fi-tier, #b0c3d9);
+  box-shadow: 0 0 16px var(--fi-tier, #b0c3d9);
+}
+.fi-tier { margin-top: 8px; font-size: 12px; letter-spacing: 0.16em; color: var(--fi-tier, #b0c3d9); }
+
+/* 底部信息条 */
+.fi-foot {
+  display: flex;
+  /* ⚠️竖排,不是并排:信息条与提示行并排时,信息格一多就把提示行挤成**一字一行的竖条**
+   * (1.5.0 加到六格时真截图上就是这样;几何断言全绿,只有截图看得见)。竖排后两边都不会被挤。 */
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  /* 右侧留 42% 空白:那是手持刀的位置,信息条压上去就成了「字写在刀上」。 */
+  padding: 18px 42% 22px 26px;
+  background: linear-gradient(to top, #000000aa, transparent);
+}
+/* 格子数会随宿主能力变(旧宿主少三格)→ 必须能换行,不能假定一行放得下。 */
+.fi-stats { display: flex; flex-wrap: wrap; gap: 14px 26px; }
+.fi-stat { min-width: 96px; }
+.fi-stat b { display: block; font-size: 11px; letter-spacing: 0.14em; color: #8b97a6; font-weight: 600; }
+.fi-stat span { font-size: 15px; font-variant-numeric: tabular-nums; }
+.fi-float { font: 12px/1.4 ui-monospace, monospace; color: #7f8b99; }
+.fi-stattrak { color: #cf6a32; font-weight: 650; }
+
+.fi-hint { font-size: 12px; color: #7f8b99; padding-bottom: 2px; }
+.fi-hint kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid #ffffff26;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: #ffffff12;
+  font: 11px/1.5 ui-monospace, monospace;
+}
+
+/* 皮肤箱:右侧抽屉,列库里能检视的模型文件 */
+/* ⚠️左侧,不是右侧:刀是第一人称挂在**右下角**的,浮层控件放右边会正好压在刀上。 */
+.fi-case {
+  position: absolute;
+  top: 50%;
+  left: 22px;
+  transform: translateY(-50%);
+  width: 232px;
+  max-height: 62vh;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid #ffffff1a;
+  border-radius: 12px;
+  background: #0e1116e0;
+  backdrop-filter: blur(10px);
+}
+.fi-case h4 { margin: 2px 4px 8px; font-size: 11px; letter-spacing: 0.14em; color: #8b97a6; font-weight: 600; }
+.fi-item {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #cfd8e3;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fi-item:hover { background: #ffffff14; }
+.fi-item.is-on { background: color-mix(in srgb, var(--fi-tier, #4b69ff) 26%, transparent); color: #fff; }
+.fi-empty { padding: 6px 9px 2px; font-size: 12px; line-height: 1.6; color: #7f8b99; }
+.fi-empty code { color: #a9b6c5; font-size: 11px; white-space: nowrap; }
+
+.fi-err { margin: 6px 4px 0; font-size: 12px; color: #e2796b; }
+
+/* 设置 → 插件 → 检视台:模型与刀皮绑定。这块住在宿主 .plugin-card 里,
+   只消费 Genesis token;不复制第二套卡片材质,也不写死阴影。 */
+.fi-binding-card { padding: 0; overflow: hidden; color: var(--text, inherit); }
+.fi-binding-intro {
+  padding: 12px 14px;
+  color: var(--text-muted, #7b8490);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.2));
+}
+.fi-binding-head,
+.fi-binding-row {
+  display: grid;
+  /* 五列:模型 / 刀皮预设 / 刀型 / 颜色 / 检视动作。列窄的时候整卡横向滚,别把 select 压成一条缝。 */
+  grid-template-columns: minmax(140px, 1fr) minmax(104px, 0.5fr) minmax(96px, 0.4fr) minmax(112px, 0.44fr) minmax(104px, 0.5fr);
+  align-items: center;
+  gap: 10px;
+}
+.fi-binding-card > .fi-binding-head,
+.fi-binding-card > .fi-binding-list { min-width: 620px; }
+.fi-binding-card { overflow-x: auto; }
+
+/* 工作文件夹一行:路径 + 「打开文件夹」。用户/agent 得先知道往哪儿放文件,这一行就是答案。 */
+.fi-folder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.2));
+}
+.fi-folder-text { min-width: 0; flex: 1; }
+.fi-folder-text b { display: block; font-size: 12px; font-weight: 620; }
+.fi-folder-text small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-faint, var(--text-muted, #7b8490));
+  font: 10.5px/1.5 var(--font-mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+.fi-folder-text small:last-child { font-family: inherit; font-size: 11px; }
+.fi-folder-open {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.24));
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-2, transparent);
+  color: var(--text, inherit);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.fi-folder-open:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
+/* 坏文件不吞:读不进来的自制文件在这里逐条报人话原因(不然用户改半天不知道错在哪)。 */
+.fi-folder-bad {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.2));
+  color: var(--warn-ink, #b4741f);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.fi-folder-bad code { font: 10.5px var(--font-mono, ui-monospace, monospace); overflow-wrap: anywhere; }
+.fi-binding-head {
+  padding: 8px 14px 6px;
+  color: var(--text-faint, var(--text-muted, #7b8490));
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+}
+.fi-binding-row {
+  min-height: 54px;
+  padding: 8px 14px;
+  border-top: 1px solid color-mix(in srgb, var(--border, #888) 58%, transparent);
+}
+.fi-binding-row:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.07)); }
+.fi-binding-model { min-width: 0; }
+.fi-binding-model b,
+.fi-binding-model small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fi-binding-model b { font-size: 13px; font-weight: 620; }
+.fi-binding-model small {
+  margin-top: 1px;
+  color: var(--text-faint, var(--text-muted, #7b8490));
+  font: 10px/1.35 var(--font-mono, ui-monospace, monospace);
+}
+.fi-binding-preset,
+.fi-binding-motion,
+.fi-binding-type {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.24));
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-2, transparent);
+  color: var(--text, inherit);
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.fi-binding-color { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.fi-binding-color-input {
+  width: 34px;
+  height: 30px;
+  flex: 0 0 34px;
+  padding: 3px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.24));
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-2, transparent);
+  cursor: pointer;
+}
+.fi-binding-auto {
+  min-width: 50px;
+  height: 30px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.24));
+  border-radius: var(--radius-sm, 8px);
+  background: transparent;
+  color: var(--text-muted, inherit);
+  padding: 0 9px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.fi-binding-auto:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); color: var(--text, inherit); }
+.fi-binding-auto.is-on {
+  border-color: color-mix(in srgb, var(--accent, #6c5ce7) 52%, var(--border, transparent));
+  background: var(--accent-light, rgba(108, 92, 231, 0.12));
+  color: var(--accent-ink, var(--accent, #6c5ce7));
+}
+/* 选了刀皮预设 = 刀型/颜色由文件说了算,置灰的控件要看得出来是「被预设接管」而不是坏了。 */
+.fi-binding-row select:disabled,
+.fi-binding-row input:disabled,
+.fi-binding-row button:disabled { opacity: 0.45; cursor: not-allowed; }
+.fi-binding-empty { padding: 16px 14px; color: var(--text-muted, #7b8490); font-size: 12px; }
+
+@media (max-width: 720px) {
+  .fi-binding-head { display: none; }
+  .fi-binding-row { grid-template-columns: 1fr 112px; }
+  .fi-binding-model { grid-column: 1 / -1; }
+}

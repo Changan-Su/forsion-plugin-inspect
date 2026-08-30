@@ -1,0 +1,21 @@
+{
+  "name": "forsion-plugin-inspect",
+  "private": true,
+  "version": "1.6.1",
+  "description": "Forsion 检视台(构建源;产物 main.js 已提交)",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node check.mjs",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run build && npm run check"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

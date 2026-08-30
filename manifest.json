@@ -1,0 +1,36 @@
+{
+  "id": "inspect",
+  "name": "检视台",
+  "nameEn": "Inspect",
+  "version": "1.6.1",
+  "apiVersion": 1,
+  "minAppVersion": "2.8.1",
+  "description": "像 CS 对战中那样,在当前页面上切刀并检视。支持普通刀与可动双柄蝴蝶刀;刀与主手分轴,手不会跟着刀转圈。设置页可为每个对话模型分别绑定刀型与刀皮颜色,并从笔记库里选自制刀皮预设(.skin.json)与自定义检视动作(.motion.json)。短按 F 在透明鼠标穿透层上播放一次切刀 + 一次检视后自动收刀;长按 F 打开详情页:品质如实对应当前思考档(Effort),另有该模型的最大上下文与本会话已用 token。刀与手也可换成自己的 .glb / .gltf。随包带两份技能,可直接让 agent 替你做刀皮和检视动作。全部离线。",
+  "descriptionEn": "Flourish a knife directly over the current page. Includes the standard knife and an articulated dual-handle butterfly knife; weapon motion is isolated from the hand. Bind every chat model to its own knife type and color, or to a hand-made .skin.json preset and a custom .motion.json inspect animation from your vault. A short F plays one draw and one inspect before holstering on a click-through layer; hold F for the detail panel, where rarity maps to the current thinking effort and the stats show the model's context window and the session's token usage. Custom .glb / .gltf knife and hand models remain supported. Two bundled skills let an agent author skins and motions for you. Fully offline.",
+  "main": "main.js",
+  "onboarding": {
+    "intro": "检视台把「你正在用哪个模型」变成一件握在手里的藏品 —— 照搬 CS 对战中的第一人称检视:页面还在,只是手上那把刀被举起来耍两下。",
+    "steps": [
+      {
+        "title": "短按 F:切刀 + 耍一下",
+        "description": "在 Tangu Space、光标不在输入框里的时候轻按 F。右下角抽出一把刀(切刀动作照 CS 刺刀录像),接着走一遍检视,耍完自动收刀。整层鼠标穿透 —— 期间你照常打字、点按钮。"
+      },
+      {
+        "title": "长按 F:看详情",
+        "description": "按住 F 不放约半秒,拉出全屏详情页:品质档**如实对应当前会话的思考档**(off→消费级 …… max→非凡),外加这个模型的最大上下文、本会话已用 token,还有换刀换手的「皮肤箱」。里面能拖着转、点一下重播。"
+      },
+      {
+        "title": "给模型绑定刀皮",
+        "description": "在设置 → 插件 → 检视台中,可以逐个模型选普通刀/蝴蝶刀和颜色。没有绑定的模型继续用普通刀 + 自动色。"
+      },
+      {
+        "title": "换成自己的刀皮 / 动作",
+        "description": "设置页第一行写着插件工作文件夹的绝对路径,点「打开文件夹」直达。把 .skin.json(配色预设)、.motion.json(检视动作)放进去,就能在设置里逐模型绑定;.glb / .gltf 模型则在长按 F 的「皮肤箱」里换(上面一节换刀,下面一节换手)。不想自己写?让 agent 用随包的「检视台刀皮制作」「检视台检视动作」两个技能替你做。"
+      },
+      {
+        "title": "两个开关",
+        "description": "设置页可以放开「任何 Space 都能按 F」,或者关掉 F 快捷键只留命令面板(命令面板里两档各有一条)。"
+      }
+    ]
+  }
+}
