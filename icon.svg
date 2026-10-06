@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Inspect — Knife edge</title>
+  <!-- Original Forsion plugin identity artwork, 2026-10-05. -->
+  <defs><linearGradient id="tile" x1="28" y1="12" x2="222" y2="252" gradientUnits="userSpaceOnUse"><stop stop-color="#304551"/><stop offset="1" stop-color="#1b2c35"/></linearGradient></defs>
+  <rect x="4" y="4" width="248" height="248" rx="58" fill="url(#tile)"/>
+  <g style="--ink:#f1eddc;--accent:#88babe;--cut:#1b2c35" fill="none" stroke="var(--ink)" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M191 49Q188 104 145 151L129 163L99 134L146 81Q164 60 191 49Z" fill="var(--ink)" stroke="none"/>
+    <path d="M179 63L119 141" stroke="var(--accent)" stroke-width="7"/>
+    <path d="M98 146l24 24-38 38q-6 6-12 0l-13-13q-6-6 0-12Z" fill="var(--accent)" stroke="none"/>
+    <path d="M87 136l44 44" stroke-width="13"/>
+  </g>
+</svg>
