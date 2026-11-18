@@ -96,11 +96,43 @@ interface Data {
   bindings?: Record<string, KnifeBinding>
 }
 let data: Data = {}
-const dataReady = Promise.resolve(ctx.loadData?.<Data | Record<string, string>>()).then((v) => {
-  if (!v || typeof v !== 'object') return
-  // 1.0.x 存的是扁平的 { modelId: path };迁移成 { skins: … },别让老用户的绑定丢了。
-  data = 'skins' in v || 'hand' in v || 'bindings' in v ? (v as Data) : { skins: v as Record<string, string> }
-})
+// 存过却读不出来(宿主 2026-11-17 起 reject,code = 'plugin-data-unreadable':读错误 / 零字节 / 写到一半 / 被手改坏):
+// 以前这里没有 catch —— 未处理的 reject,`dataReady.then(refreshLibrary)` 永远不跑(自制刀皮库、设置页都起不来),
+// 下一次改绑定 / 换刀还会把 `{}` + 这一项写回去,用户原来的绑定全没了。现在:本次运行里 `dataBlocked`,
+// 一律不写盘;改绑定、换刀、换手**拒掉**并再提示一次(在空白的表上改等于重做一份,看着像绑定全丢了 —— 不如不让改);
+// 按 F 照常,用默认的刀和手。下次加载重新读。没存过(null)照旧是默认;旧宿主读不出来也回 null,只能当没存过。
+// 别的读失败维持原样(当没读到、照常保存),只是不再让它变成未处理的 reject、连累刀皮库。
+let dataLoaded = false
+let dataBlocked = false
+const isDataUnreadable = (e: unknown): boolean =>
+  !!e && typeof e === 'object' && (e as { code?: unknown }).code === 'plugin-data-unreadable'
+const unreadableMsg = (): string => t(
+  '读不出已保存的刀皮绑定,换刀和改绑定先停用,也不会保存改动,原来的绑定没有动。这次按 F 用的是默认的刀和手。',
+  'Your saved knife bindings could not be read. Changing knives and bindings is paused and nothing will be saved, so the original is left as it was. Pressing F uses the default knife and hand for now.',
+)
+const warnUnreadable = (): void => {
+  try { ctx.notify?.(unreadableMsg(), { level: 'warning' }) } catch (e) { console.warn('[inspect] notify failed', e) }
+}
+/** 插件已卸载(禁用 / 重载):排队等读完的改动不再落地,免得旧实例拿旧快照盖掉新实例刚存的。 */
+let pluginDisposed = false
+const dataReady: Promise<void> = Promise.resolve()
+  .then(() => ctx.loadData?.<Data | Record<string, string>>())
+  .then((v) => {
+    if (!v || typeof v !== 'object') return
+    // 1.0.x 存的是扁平的 { modelId: path };迁移成 { skins: … },别让老用户的绑定丢了。
+    data = 'skins' in v || 'hand' in v || 'bindings' in v ? (v as Data) : { skins: v as Record<string, string> }
+  })
+  .catch((e: unknown) => {
+    if (isDataUnreadable(e)) {
+      dataBlocked = true
+      console.warn('[inspect] saved knife bindings could not be read; editing them is paused', e)
+      warnUnreadable()
+      return
+    }
+    console.warn('[inspect] loadData failed; using the defaults', e)
+  })
+  // 通知抛错之类也得算「读完」:不然排队的改动永远不落地
+  .then(() => { dataLoaded = true }, () => { dataLoaded = true })
 const modelAssetOf = (id: string): string => data.skins?.[id] ?? ''
 const bindingOf = (id: string): KnifeBinding => data.bindings?.[id] ?? {}
 const presetOf = (id: string): SkinPreset | null => {
@@ -117,7 +149,26 @@ const motionForModel = (id: string): (Motion & { name: string }) | null => {
   const m = bindingOf(id).motion
   return (m && lib.motions.get(m)) || null
 }
-const save = (): void => { void ctx.saveData?.(data) }
+const save = (): void => {
+  if (dataBlocked) return
+  void ctx.saveData?.(data)
+}
+/** 改落盘数据的唯一入口。读还没回来 → 等读完再改(否则读回来那一下冲掉这次改动,或者这次先写盘、
+ *  把存着的整份盖成 `{}` + 这一项);读不出来 → 不改、不写、再提示一次。`done(applied)` 在改完 / 拒掉后调。 */
+function editData(apply: () => void, done?: (applied: boolean) => void): void {
+  if (!dataLoaded) {
+    void dataReady.then(() => { if (!pluginDisposed) editData(apply, done) })
+    return
+  }
+  if (dataBlocked) {
+    warnUnreadable()
+    done?.(false)
+    return
+  }
+  apply()
+  save()
+  done?.(true)
+}
 
 // ── 用户自制内容库:工作文件夹里的 *.skin.json / *.motion.json ────────────────
 // 解析结果**同步可查**(装备一把刀是零延迟的事,不能等 IO),所以在这里缓存一份;
@@ -204,7 +255,10 @@ const hslHex = ([h, s, l]: [number, number, number]): string => {
 }
 
 /** 保存一条绑定;“普通刀 + 自动色”就是默认态,直接删条目保持落盘干净。 */
-function setBinding(model: TanguModel, patch: Partial<KnifeBinding>): void {
+function setBinding(model: TanguModel, patch: Partial<KnifeBinding>, done?: (applied: boolean) => void): void {
+  editData(() => applyBinding(model, patch), done)
+}
+function applyBinding(model: TanguModel, patch: Partial<KnifeBinding>): void {
   const cur = bindingOf(model.id)
   const next: KnifeBinding = { ...cur, ...patch, name: model.name }
   // ⚠️`{ preset: undefined }` 展开后键还在(值是 undefined),saveData 落盘会留一堆 null。
@@ -216,7 +270,6 @@ function setBinding(model: TanguModel, patch: Partial<KnifeBinding>): void {
   data.bindings = { ...(data.bindings ?? {}) }
   if (!next.type && !next.color && !next.preset && !next.motion) delete data.bindings[model.id]
   else data.bindings[model.id] = next
-  save()
 }
 
 /** 工作文件夹的**绝对路径**(设置页要显示得出来 —— 用户/agent 得先知道往哪儿放文件)。
@@ -332,6 +385,7 @@ ctx.registerSettingsView?.({
           </div>
           ${ctx.app.reveal ? `<button class="fi-folder-open" type="button">${t('打开文件夹', 'Open folder')}</button>` : ''}
         </div>
+        ${dataBlocked ? `<div class="fi-folder-bad fi-data-unreadable">${escapeHtml(unreadableMsg())}</div>` : ''}
         ${lib.problems.length ? `<div class="fi-folder-bad">${t('这些文件没能读进来:', 'These files could not be loaded:')}${
           lib.problems.map((p) => `<div><code>${escapeHtml(p.path)}</code> — ${escapeHtml(p.why)}</div>`).join('')}</div>` : ''}
         <div class="fi-binding-head"><span>${t('模型', 'MODEL')}</span><span>${t('刀皮预设', 'PRESET')}</span><span>${
@@ -342,10 +396,12 @@ ctx.registerSettingsView?.({
           const type = typeOfModel(m.id)
           const color = preset?.primary || binding.color || hslHex(skinOf(m.id).primaryHsl)
           // 选了预设 = 刀型和颜色由文件说了算,两个控件置灰。不置灰的话「改了没反应」会被当成 bug。
+          // 绑定读不出来 = 整行都改不了(上面有一条说明)。
           const off = preset ? ' disabled' : ''
+          const lock = dataBlocked ? ' disabled' : ''
           return `<div class="fi-binding-row" data-model="${escapeHtml(m.id)}">
             <div class="fi-binding-model"><b>${escapeHtml(m.name)}</b><small>${escapeHtml(m.id)}</small></div>
-            <select class="fi-binding-preset" aria-label="${t('刀皮预设', 'Skin preset')}">${options(
+            <select class="fi-binding-preset" aria-label="${t('刀皮预设', 'Skin preset')}"${lock}>${options(
               [
                 { v: '', label: t('◇ 不用预设', '◇ None') },
                 ...presets.map(([path, v]) => ({ v: path, label: v.name })),
@@ -355,15 +411,15 @@ ctx.registerSettingsView?.({
               ],
               binding.preset || '',
             )}</select>
-            <select class="fi-binding-type" aria-label="${t('刀型', 'Knife type')}"${off}>
+            <select class="fi-binding-type" aria-label="${t('刀型', 'Knife type')}"${off || lock}>
               <option value="standard"${type === 'standard' ? ' selected' : ''}>${t('普通刀', 'Standard')}</option>
               <option value="butterfly"${type === 'butterfly' ? ' selected' : ''}>${t('蝴蝶刀', 'Butterfly')}</option>
             </select>
             <div class="fi-binding-color">
-              <input class="fi-binding-color-input" type="color" value="${escapeHtml(color)}" aria-label="${t('刀皮颜色', 'Knife color')}"${off}>
-              <button class="fi-binding-auto${binding.color || preset ? '' : ' is-on'}" type="button"${off}>${t('自动', 'Auto')}</button>
+              <input class="fi-binding-color-input" type="color" value="${escapeHtml(color)}" aria-label="${t('刀皮颜色', 'Knife color')}"${off || lock}>
+              <button class="fi-binding-auto${binding.color || preset ? '' : ' is-on'}" type="button"${off || lock}>${t('自动', 'Auto')}</button>
             </div>
-            <select class="fi-binding-motion" aria-label="${t('检视动作', 'Inspect motion')}">${options(
+            <select class="fi-binding-motion" aria-label="${t('检视动作', 'Inspect motion')}"${lock}>${options(
               [
                 { v: '', label: t('◇ 内置', '◇ Built-in') },
                 ...motions.map(([path, v]) => ({ v: path, label: v.name })),
@@ -385,11 +441,13 @@ ctx.registerSettingsView?.({
       const target = event.target as HTMLInputElement | HTMLSelectElement
       const model = modelFor(target)
       if (!model) return
-      if (target.classList.contains('fi-binding-type')) setBinding(model, { type: target.value === 'butterfly' ? 'butterfly' : 'standard' })
-      else if (target.classList.contains('fi-binding-color-input')) setBinding(model, { color: target.value.toLowerCase() })
-      else if (target.classList.contains('fi-binding-preset')) setBinding(model, { preset: target.value || undefined })
-      else if (target.classList.contains('fi-binding-motion')) setBinding(model, { motion: target.value || undefined })
-      render(true)
+      // 改完 / 拒掉都整页重画:拒掉时控件要退回原值;读还没回来时改动会晚一拍落地。
+      const redraw = (): void => render(true)
+      if (target.classList.contains('fi-binding-type')) setBinding(model, { type: target.value === 'butterfly' ? 'butterfly' : 'standard' }, redraw)
+      else if (target.classList.contains('fi-binding-color-input')) setBinding(model, { color: target.value.toLowerCase() }, redraw)
+      else if (target.classList.contains('fi-binding-preset')) setBinding(model, { preset: target.value || undefined }, redraw)
+      else if (target.classList.contains('fi-binding-motion')) setBinding(model, { motion: target.value || undefined }, redraw)
+      else render(true)
     }
     const onClick = (event: Event): void => {
       const hit = event.target as HTMLElement
@@ -398,8 +456,7 @@ ctx.registerSettingsView?.({
       if (!target) return
       const model = modelFor(target)
       if (!model) return
-      setBinding(model, { color: undefined })
-      render(true)
+      setBinding(model, { color: undefined }, () => render(true))
     }
     el.addEventListener('change', onChange)
     el.addEventListener('click', onClick)
@@ -635,15 +692,20 @@ function open(model: TanguModel): void {
       const btn = (e.target as HTMLElement).closest<HTMLElement>('.fi-item')
       if (!btn) return
       const path = btn.dataset.path || ''
-      if (btn.dataset.slot === 'hand') {
-        data.hand = path === '__none__' ? null : path || undefined
-      } else {
-        data.skins = { ...(data.skins ?? {}) }
-        if (path) data.skins[model.id] = path
-        else delete data.skins[model.id]
-      }
-      save()
-      reequip()
+      const slot = btn.dataset.slot
+      editData(() => {
+        if (slot === 'hand') {
+          data.hand = path === '__none__' ? null : path || undefined
+        } else {
+          data.skins = { ...(data.skins ?? {}) }
+          if (path) data.skins[model.id] = path
+          else delete data.skins[model.id]
+        }
+      }, (applied) => {
+        if (closing) return
+        if (applied) reequip()
+        else fail(unreadableMsg()) // 面板铺满整屏,通知可能被压在下面 —— 皮肤箱里也写一句
+      })
     })
     reequip()
   })
@@ -787,6 +849,7 @@ document.head.appendChild(style)
 /** 宿主的 teardown 出口 —— build.mjs 的 footer 把它 `return` 出去(见那边的注释)。
  *  ⚠️ keydown 是挂在 window 上的:不摘,禁用插件后按 F 照样弹检视台。 */
 export function dispose(): void {
+  pluginDisposed = true
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', clearHold)
