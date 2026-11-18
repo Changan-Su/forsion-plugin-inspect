@@ -8,10 +8,10 @@
   改绑定和换刀先停用、提示一次,也不保存:设置页那张表整行置灰、顶上写一句说明,皮肤箱里点了也会说明。
   以前这里的读失败没人接 —— 自制刀皮库不加载、设置页起不来,下一次改绑定或换刀还会把空白绑定写回去,原来的全没了。
   现在刀皮库和设置页照常,按 F 用默认的刀和手;下次启动重新读。没存过时照旧是默认。
-  需要 2026-11-17 之后的 Forsion(更早的版本读不出来时仍当没存过)。
+  需要 2.14.2 之后的 Forsion(更早的版本读不出来时仍当没存过)。
 - 别的读失败也不再连累刀皮库:当没读到、用默认,照常保存。
 - 绑定还没读回来时改的,等读完再改、再保存,不会只存下这一项。
-- **English:** When the saved knife bindings (per-model knife type, color, preset and motion, plus the knife and hand picked in the skin case) can't be read (a read error, an empty file, a write cut off halfway, or a hand edit that broke it), changing bindings and knives is paused, you're told once, and nothing is saved: the settings table is greyed out with a note on top, and the skin case says so when clicked. Before, nothing caught that failure, so the custom skin library never loaded, the settings page never drew, and the next binding change or knife swap wrote empty bindings over the saved ones. Now the library and settings page work as usual and F uses the default knife and hand; the next start reads the file again. With nothing saved yet the defaults apply as before. Needs a Forsion build from 2026-11-17 or later (earlier builds still treat unreadable data as never saved).
+- **English:** When the saved knife bindings (per-model knife type, color, preset and motion, plus the knife and hand picked in the skin case) can't be read (a read error, an empty file, a write cut off halfway, or a hand edit that broke it), changing bindings and knives is paused, you're told once, and nothing is saved: the settings table is greyed out with a note on top, and the skin case says so when clicked. Before, nothing caught that failure, so the custom skin library never loaded, the settings page never drew, and the next binding change or knife swap wrote empty bindings over the saved ones. Now the library and settings page work as usual and F uses the default knife and hand; the next start reads the file again. With nothing saved yet the defaults apply as before. Needs Forsion newer than 2.14.2 (earlier versions still treat unreadable data as never saved).
 - **English:** Other read failures no longer take the skin library down either: the plugin uses the defaults and saves as usual.
 - **English:** A binding changed before the saved ones have loaded now waits for them, instead of saving only that one change.
 
