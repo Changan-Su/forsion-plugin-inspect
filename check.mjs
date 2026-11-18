@@ -399,6 +399,188 @@ t('导入的**手**模型不走摆正(手有自己的朝向)', () => {
   A.match(src, /stage\.loadModel\(assetUrl\(path\), true\)/, '刀的加载必须传 orient=true')
 })
 
+// ── 5. 存过却读不出来(宿主 2026-11-17 起 loadData reject,code = 'plugin-data-unreadable')──────────────
+// 不许拿 `{}` 写盘(会把用户的整份绑定盖掉);改绑定 / 换刀 / 换手拒掉并再提示一次;刀皮库照常加载、设置页照常画。
+// 读还没回来时改的绑定等读完再改、再存。负对照:这一节拷到 origin/main 的检出里跑,旧代码的未处理 reject 也记成红。
+{
+  const ta = async (name, fn) => {
+    TOTAL++
+    try {
+      await fn()
+      console.log(`PASS  ${name}`)
+    } catch (e) {
+      fail.push(name)
+      console.log(`FAIL  ${name}\n      ${String(e?.message ?? e).split('\n')[0]}`)
+    }
+  }
+  let unhandled = 0
+  process.on('unhandledRejection', () => { unhandled++ })
+  const settle = async () => { for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r)) }
+  const unreadable = () => Object.assign(new Error('plugin-data-unreadable'), { code: 'plugin-data-unreadable', reason: 'invalid-json' })
+  const HAN = /[㐀-鿿]/
+  const mk = (tag = 'div') => {
+    const handlers = new Map()
+    const cache = new Map()
+    const e = {
+      tagName: String(tag).toUpperCase(), className: '', style: { setProperty() {}, cssText: '' }, dataset: {}, hidden: false,
+      textContent: '', innerHTML: '', children: [],
+      classList: { _s: new Set(), add(...c) { c.forEach((x) => this._s.add(x)) }, remove(...c) { c.forEach((x) => this._s.delete(x)) }, toggle() {}, contains(c) { return this._s.has(c) } },
+      appendChild(c) { e.children.push(c); return c }, remove() {}, setAttribute() {},
+      addEventListener(type, fn) { if (!handlers.has(type)) handlers.set(type, new Set()); handlers.get(type).add(fn) },
+      removeEventListener(type, fn) { handlers.get(type)?.delete(fn) },
+      fire(type, ev = {}) { for (const fn of [...(handlers.get(type) ?? [])]) fn({ type, preventDefault() {}, stopPropagation() {}, ...ev }) },
+      querySelector(sel) { if (!cache.has(sel)) cache.set(sel, mk()); return cache.get(sel) },
+      querySelectorAll: () => [], closest: () => null, getContext: () => null, width: 0, height: 0,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }),
+    }
+    return e
+  }
+  const boot = ({ locale = 'zh', loadData } = {}) => {
+    globalThis.document = {
+      createElement: (tag) => mk(tag), createElementNS: (_ns, tag) => mk(tag), head: mk('head'), body: mk('body'), activeElement: null,
+      addEventListener() {}, removeEventListener() {}, querySelector: () => null,
+    }
+    globalThis.window = { addEventListener() {}, removeEventListener() {}, setInterval: () => 0, setTimeout: () => 0 }
+    globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} }
+    globalThis.requestAnimationFrame = () => 0
+    globalThis.devicePixelRatio = 1
+    const got = { notes: [], saves: [], views: [], cmds: [], listed: 0 }
+    const model = { id: 'gpt-x', name: 'GPT X' }
+    const ctx = {
+      app: { notify() {}, workFolder: () => 'Inspect', vaultRoot: () => '/v', readFile: async () => null, listFiles: async () => { got.listed++; return ['Inspect/a.glb'] } },
+      registerCommand: (c) => got.cmds.push(c), registerSetting() {}, registerSettingsView: (v) => got.views.push(v),
+      notify: (m, o) => got.notes.push({ m, level: o?.level }),
+      getLocale: () => locale,
+      saveData: async (v) => { got.saves.push(JSON.parse(JSON.stringify(v))) },
+      tangu: { activeModel: () => model, models: () => [model], activeSpace: () => 'tangu', subscribe: () => () => {} },
+      ...(loadData ? { loadData } : {}),
+    }
+    got.dispose = new Function('ctx', main)(ctx)
+    got.warnings = () => got.notes.filter((n) => n.level === 'warning' && !/WebGL/.test(n.m))
+    /** 设置页:挂上;改一下这个模型的刀型 / 点「自动」色。 */
+    got.settings = () => {
+      const el = mk()
+      const off = got.views[0]?.mount?.(el)
+      const row = { dataset: { model: model.id } }
+      return {
+        el, off,
+        setType: (v) => el.fire('change', { target: { value: v, classList: { contains: (c) => c === 'fi-binding-type' }, closest: (sel) => (sel === '.fi-binding-row' ? row : null) } }),
+        autoColor: () => el.fire('click', { target: { closest: (sel) => (sel === '.fi-binding-auto' ? { closest: (s2) => (s2 === '.fi-binding-row' ? row : null) } : null) } }),
+      }
+    }
+    /** 长按 F 的面板:打开,在皮肤箱里点一项。 */
+    got.panelPick = async (path, slot) => {
+      got.cmds.find((c) => c.id === 'inspect-panel')?.run()
+      await settle()
+      const root = globalThis.document.body.children.at(-1)
+      root?.querySelector('.fi-list')?.fire('click', { target: { closest: () => ({ dataset: { path, slot } }) } })
+      await settle()
+      return root
+    }
+    return got
+  }
+  const realWarn = console.warn
+  console.warn = () => {}
+
+  await ta('读不出来:启动时提示一次(中文、不写路径),没有未处理的 reject,刀皮库照常加载', async () => {
+    const before = unhandled
+    const g = boot({ loadData: async () => { throw unreadable() } })
+    await settle()
+    A.equal(unhandled - before, 0, '未处理的 reject —— dataReady 断了,刀皮库与设置页都起不来')
+    A.ok(g.listed >= 1, '刀皮库没加载(listFiles 一次都没调)')
+    A.equal(g.warnings().length, 1, JSON.stringify(g.notes))
+    A.match(g.warnings()[0].m, /读不出已保存的刀皮绑定/)
+    A.ok(!/\/v\/|\.json/.test(g.warnings()[0].m), '提示里不该写路径')
+    A.equal(g.saves.length, 0)
+    g.dispose?.()
+  })
+  await ta('读不出来:设置页照常画出、带说明、控件置灰;改刀型 / 点「自动」不写盘,再提示', async () => {
+    const g = boot({ loadData: async () => { throw unreadable() } })
+    await settle()
+    const s = g.settings()
+    await settle()
+    A.match(s.el.innerHTML, /fi-binding-row/, '设置页没画出绑定表')
+    A.match(s.el.innerHTML, /读不出已保存的刀皮绑定/, '设置页上没有说明')
+    A.match(s.el.innerHTML, /class="fi-binding-preset"[^>]*disabled/, '预设下拉没置灰')
+    A.match(s.el.innerHTML, /class="fi-binding-type"[^>]*disabled/, '刀型下拉没置灰')
+    s.setType('butterfly')
+    s.autoColor()
+    await settle()
+    A.equal(g.saves.length, 0, `写盘了:${JSON.stringify(g.saves)}`)
+    A.equal(g.warnings().length, 3, `每次被拒都该再提示:${JSON.stringify(g.notes)}`)
+    s.off?.()
+    g.dispose?.()
+  })
+  await ta('读不出来:面板皮肤箱换刀不写盘,皮肤箱里写一句', async () => {
+    const g = boot({ loadData: async () => { throw unreadable() } })
+    await settle()
+    const root = await g.panelPick('Inspect/a.glb', 'skin')
+    A.equal(g.saves.length, 0, `写盘了:${JSON.stringify(g.saves)}`)
+    A.match(root?.querySelector('.fi-err')?.textContent ?? '', /读不出已保存的刀皮绑定/)
+    A.equal(g.warnings().length, 2, JSON.stringify(g.notes))
+    g.dispose?.()
+  })
+  await ta('读不出来(英文界面):提示是英文、不含汉字', async () => {
+    const g = boot({ locale: 'en', loadData: async () => { throw unreadable() } })
+    await settle()
+    const m = g.warnings()[0]?.m ?? ''
+    A.match(m, /could not be read/)
+    A.ok(!HAN.test(m), m)
+    g.dispose?.()
+  })
+  await ta('没存过(loadData → null,旧宿主读不出来也是这样):改绑定、面板换刀照常写盘,不提示', async () => {
+    const g = boot({ loadData: async () => null })
+    await settle()
+    const s = g.settings()
+    await settle()
+    s.setType('butterfly')
+    await settle()
+    A.equal(g.saves.length, 1, JSON.stringify(g.saves))
+    A.equal(g.saves[0].bindings?.['gpt-x']?.type, 'butterfly')
+    await g.panelPick('Inspect/a.glb', 'skin')
+    A.equal(g.saves.length, 2, `面板换刀没写盘(探针看不见写盘的话,上面那条「不写盘」是空话):${JSON.stringify(g.saves)}`)
+    A.equal(g.saves[1].skins?.['gpt-x'], 'Inspect/a.glb')
+    A.equal(g.warnings().length, 0, JSON.stringify(g.notes))
+    s.off?.()
+    g.dispose?.()
+  })
+  await ta('别的 reject(不带 plugin-data-unreadable 码):当没读到、照常写盘、不提示,也不留未处理的 reject', async () => {
+    const before = unhandled
+    const g = boot({ loadData: async () => { throw new Error('boom') } })
+    await settle()
+    A.equal(unhandled - before, 0, '未处理的 reject')
+    A.ok(g.listed >= 1, '刀皮库没加载')
+    const s = g.settings()
+    await settle()
+    s.setType('butterfly')
+    await settle()
+    A.equal(g.saves.length, 1, JSON.stringify(g.saves))
+    A.equal(g.warnings().length, 0, JSON.stringify(g.notes))
+    s.off?.()
+    g.dispose?.()
+  })
+  await ta('绑定还在读的时候就改了:等读完再存,存下的是「原来的 + 这次改的」', async () => {
+    let release
+    const g = boot({ loadData: () => new Promise((r) => { release = r }) })
+    await settle()
+    const s = g.settings()
+    s.setType('butterfly')
+    await settle()
+    A.equal(g.saves.length, 0, `读回来之前就写盘了:${JSON.stringify(g.saves)}`)
+    release?.({ hand: null, skins: { other: 'Inspect/b.glb' }, bindings: { other: { color: '#112233', name: 'Other' } } })
+    await settle()
+    A.equal(g.saves.length, 1, JSON.stringify(g.saves))
+    const last = g.saves[0]
+    A.equal(last.hand, null, '原来的「不画手」丢了')
+    A.equal(last.skins?.other, 'Inspect/b.glb', '原来的刀模型绑定丢了')
+    A.equal(last.bindings?.other?.color, '#112233', '原来的绑定丢了')
+    A.equal(last.bindings?.['gpt-x']?.type, 'butterfly', '这次改的没存上')
+    s.off?.()
+    g.dispose?.()
+  })
+  console.warn = realWarn
+}
+
 console.log(`\n${TOTAL - fail.length}/${TOTAL} 通过`)
 if (fail.length) {
   console.log('未通过:' + fail.join(' / '))
