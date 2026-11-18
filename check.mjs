@@ -578,6 +578,18 @@ t('导入的**手**模型不走摆正(手有自己的朝向)', () => {
     s.off?.()
     g.dispose?.()
   })
+  await ta('读还没回来时改的绑定,插件先被卸载(禁用 / 重载)了:读回来后不再写盘(免得旧快照盖掉新实例刚存的)', async () => {
+    let release
+    const g = boot({ loadData: () => new Promise((r) => { release = r }) })
+    await settle()
+    const s = g.settings()
+    s.setType('butterfly')
+    s.off?.()
+    g.dispose?.()
+    release?.({ bindings: { other: { color: '#112233', name: 'Other' } } })
+    await settle()
+    A.equal(g.saves.length, 0, `卸载后还写盘了:${JSON.stringify(g.saves)}`)
+  })
   console.warn = realWarn
 }
 

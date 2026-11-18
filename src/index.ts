@@ -110,14 +110,19 @@ const unreadableMsg = (): string => t(
   '读不出已保存的刀皮绑定,换刀和改绑定先停用,也不会保存改动,原来的绑定没有动。这次按 F 用的是默认的刀和手。',
   'Your saved knife bindings could not be read. Changing knives and bindings is paused and nothing will be saved, so the original is left as it was. Pressing F uses the default knife and hand for now.',
 )
-const warnUnreadable = (): void => { ctx.notify?.(unreadableMsg(), { level: 'warning' }) }
+const warnUnreadable = (): void => {
+  try { ctx.notify?.(unreadableMsg(), { level: 'warning' }) } catch (e) { console.warn('[inspect] notify failed', e) }
+}
+/** 插件已卸载(禁用 / 重载):排队等读完的改动不再落地,免得旧实例拿旧快照盖掉新实例刚存的。 */
+let pluginDisposed = false
 const dataReady: Promise<void> = Promise.resolve()
   .then(() => ctx.loadData?.<Data | Record<string, string>>())
   .then((v) => {
     if (!v || typeof v !== 'object') return
     // 1.0.x 存的是扁平的 { modelId: path };迁移成 { skins: … },别让老用户的绑定丢了。
     data = 'skins' in v || 'hand' in v || 'bindings' in v ? (v as Data) : { skins: v as Record<string, string> }
-  }, (e: unknown) => {
+  })
+  .catch((e: unknown) => {
     if (isDataUnreadable(e)) {
       dataBlocked = true
       console.warn('[inspect] saved knife bindings could not be read; editing them is paused', e)
@@ -126,7 +131,8 @@ const dataReady: Promise<void> = Promise.resolve()
     }
     console.warn('[inspect] loadData failed; using the defaults', e)
   })
-  .then(() => { dataLoaded = true })
+  // 通知抛错之类也得算「读完」:不然排队的改动永远不落地
+  .then(() => { dataLoaded = true }, () => { dataLoaded = true })
 const modelAssetOf = (id: string): string => data.skins?.[id] ?? ''
 const bindingOf = (id: string): KnifeBinding => data.bindings?.[id] ?? {}
 const presetOf = (id: string): SkinPreset | null => {
@@ -151,7 +157,7 @@ const save = (): void => {
  *  把存着的整份盖成 `{}` + 这一项);读不出来 → 不改、不写、再提示一次。`done(applied)` 在改完 / 拒掉后调。 */
 function editData(apply: () => void, done?: (applied: boolean) => void): void {
   if (!dataLoaded) {
-    void dataReady.then(() => editData(apply, done))
+    void dataReady.then(() => { if (!pluginDisposed) editData(apply, done) })
     return
   }
   if (dataBlocked) {
@@ -843,6 +849,7 @@ document.head.appendChild(style)
 /** 宿主的 teardown 出口 —— build.mjs 的 footer 把它 `return` 出去(见那边的注释)。
  *  ⚠️ keydown 是挂在 window 上的:不摘,禁用插件后按 F 照样弹检视台。 */
 export function dispose(): void {
+  pluginDisposed = true
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('blur', clearHold)
